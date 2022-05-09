@@ -28,41 +28,42 @@ Calibration::Calibration(const std::string config_path) {
     return;
   }
   fs.open(config_path, cv::FileStorage::READ);
-  fs["number_camera"] >> nb_camera_;
-  fs["number_board"] >> nb_board_;
-  fs["refine_corner"] >> refine_corner_;
-  fs["min_perc_pts"] >> min_perc_pts_;
-  fs["number_x_square"] >> nb_x_square;
-  fs["number_y_square"] >> nb_y_square;
-  fs["root_path"] >> root_dir_;
-  fs["cam_prefix"] >> cam_prefix_;
-  fs["ransac_threshold"] >> ransac_thresh_;
-  fs["number_iterations"] >> nb_iterations_;
-  fs["distortion_model"] >> distortion_model;
-  fs["distortion_per_camera"] >> distortion_per_camera;
-  fs["boards_index"] >> boards_index;
-  fs["length_square"] >> length_square;
-  fs["length_marker"] >> length_marker;
-  fs["save_path"] >> save_path_;
-  fs["camera_params_file_name"] >> camera_params_file_name_;
-  fs["cam_params_path"] >> cam_params_path_;
-  fs["save_reprojection"] >> save_repro_;
+  fs["number_camera"] >> nb_camera_; //카메라의 수
+  fs["number_board"] >> nb_board_; //board의 수
+  fs["refine_corner"] >> refine_corner_; //corner refinement 여부
+  fs["min_perc_pts"] >> min_perc_pts_; //detection을 하기 위해 보여야 하는 point들의 최소 percentage
+  fs["number_x_square"] >> nb_x_square; //x축 방향으로 square의 수
+  fs["number_y_square"] >> nb_y_square; //y축 방향으로 sqaure의 수
+  fs["root_path"] >> root_dir_; //root path
+  fs["cam_prefix"] >> cam_prefix_; //"Cam_"
+  fs["ransac_threshold"] >> ransac_thresh_; //ransac threshold
+  fs["number_iterations"] >> nb_iterations_; //non linear refinement를 위한 최대 반복 수
+  fs["distortion_model"] >> distortion_model; //0:Brown(perspective), 1:Kannala(fisheye)
+  fs["distortion_per_camera"] >> distortion_per_camera; //카메라 별 distortion model 명시. 전부 같은 모델 사용하면 []
+  fs["boards_index"] >> boards_index; //[5,10]으로 두면 index 5와 10을 가진 32개의 board. []로 두면 0부터 board의 수만큼 인덱싱 
+  fs["length_square"] >> length_square; //length square
+  fs["length_marker"] >> length_marker; //length marker
+  fs["save_path"] >> save_path_; //저장할 경로
+  fs["camera_params_file_name"] >> camera_params_file_name_; //저장할 output의 이름
+  fs["cam_params_path"] >> cam_params_path_; //initial로 사용할 intrinsic parameter 경로. 없으면 "None"
+  fs["save_reprojection"] >> save_repro_; 
   fs["save_detection"] >> save_detect_;
-  fs["square_size_per_board"] >> square_size_per_board_;
-  fs["number_x_square_per_board"] >> number_x_square_per_board_;
-  fs["number_y_square_per_board"] >> number_y_square_per_board_;
-  fs["resolution_x_per_board"] >> resolution_x_per_board_;
-  fs["resolution_y_per_board"] >> resolution_y_per_board_;
-  fs["he_approach"] >> he_approach_;
-  fs["fix_intrinsic"] >> fix_intrinsic_;
+  fs["square_size_per_board"] >> square_size_per_board_; //board별 square의 사이즈. 전부 동일하면 []
+  fs["number_x_square_per_board"] >> number_x_square_per_board_; //board별 x축 방향 square의 수. 전부 동일하면 []
+  fs["number_y_square_per_board"] >> number_y_square_per_board_; //board별 y축 방향 square의 수. 전부 동일하면 []
+  fs["resolution_x_per_board"] >> resolution_x_per_board_; //x축 방향 pixel 수
+  fs["resolution_y_per_board"] >> resolution_y_per_board_; //y축 방향 pixel 수
+  fs["he_approach"] >> he_approach_; //0: bootstrapped he technique, 1: traditional he
+  fs["fix_intrinsic"] >> fix_intrinsic_; //intial intrinsic이 있을 때 1로 설정하면 intrinsic 고정
 
   fs.release(); // close the input file
 
   // Check if multi-size boards are used or not
+  // multiple board 사용 시 config 파일에서 정의한 파라미터들 다시 확인
   if (boards_index.size() != 0) {
     nb_board_ = boards_index.size();
   }
-  int max_board_idx = nb_board_ - 1;
+  int max_board_idx = nb_board_ - 1; //board의 max index
   if (boards_index.size() != 0) {
     max_board_idx = *max_element(boards_index.begin(), boards_index.end());
   }
@@ -77,15 +78,18 @@ Calibration::Calibration(const std::string config_path) {
            << "   Distortion mode : " << distortion_model;
 
   // check if the save dir exist and create it if it does not
+  // output 저장할 디렉토리 확인
   if (!boost::filesystem::exists(save_path_) && save_path_.length() > 0) {
     boost::filesystem::create_directories(save_path_);
   }
 
   // prepare the distortion type per camera
+  // distortion_per_camera가 []인 경우 전부 같은 모델로 할당
   if (distortion_per_camera.size() == 0)
     distortion_per_camera.assign(nb_camera_, distortion_model);
 
   // Initialize Cameras
+  // cams_[i]에 distortion model을 가진 camera 정의
   for (int i = 0; i < nb_camera_; i++) {
     std::shared_ptr<Camera> new_cam =
         std::make_shared<Camera>(i, distortion_per_camera[i]);
@@ -93,16 +97,22 @@ Calibration::Calibration(const std::string config_path) {
   }
 
   // Prepare the charuco patterns
+  // boards_index가 []일 때 board의 수만큼 크기 할당 후 인덱스 부여
   if (boards_index.size() == 0) {
     boards_index.resize(nb_board_);
     std::iota(boards_index.begin(), boards_index.end(), 0);
   }
-  std::map<int, cv::Ptr<cv::aruco::CharucoBoard>> charuco_boards;
+
+  std::map<int, cv::Ptr<cv::aruco::CharucoBoard>> charuco_boards; //cpp의 map은 dictionary 구조. map(key, value)
   int offset_count = 0;
+  //board의 개수만큼 반복문
   for (int i = 0; i <= max_board_idx; i++) {
+    //create(x축 방향 square의 수, y축 방향 square의 수, square의 가로 길이, marker의 가로 길이, marker의 type에 대한 dictionary). square와 marker의 길이는 일반적으로 meter 단위
     cv::Ptr<cv::aruco::CharucoBoard> charuco = cv::aruco::CharucoBoard::create(
-        number_x_square_per_board_[i], number_y_square_per_board_[i],
+        number_x_square_per_board_[i], number_y_square_per_board_[i], 
         length_square, length_marker, dict_);
+
+    //id는 charuco board의 개수에 따른 index가 아니라 marker의 개수에 따라 할당? 어디에 쓰는건지 모르겠다.
     if (i != 0) // If it is the first board then just use the standard idx
     {
       int id_offset = charuco_boards[i - 1]->ids.size() + offset_count;
@@ -118,11 +128,18 @@ Calibration::Calibration(const std::string config_path) {
     // Initialize board
     std::shared_ptr<Board> new_board = std::make_shared<Board>(config_path, i);
     boards_3d_[i] = new_board;
+    //point의 개수
     boards_3d_[i]->nb_pts_ =
         (boards_3d_[i]->nb_x_square_ - 1) * (boards_3d_[i]->nb_y_square_ - 1);
+    
+    //3d board와 매칭되는 charuco board
     boards_3d_[i]->charuco_board_ = charuco_boards[boards_index[i]];
+    
+    //point의 개수만큼 pts_3d에 할당
     boards_3d_[i]->pts_3d_.reserve(boards_3d_[i]->nb_pts_);
+    
     // Prepare the 3D pts of the boards
+    // x,y축 square의 개수만큼 이중 반복문 돌면서 (square size * x축 index, square size * y축 index, 0)으로 3d point 할당
     for (int y = 0; y < boards_3d_[i]->nb_y_square_ - 1; y++) {
       for (int x = 0; x < boards_3d_[i]->nb_x_square_ - 1; x++) {
         boards_3d_[i]->pts_3d_.emplace_back(x * boards_3d_[i]->square_size_,
@@ -141,19 +158,25 @@ void Calibration::boardExtraction() {
                                                  "jpeg", "jp2", "tiff"};
 
   // iterate through the cameras
+  // 카메라 수만큼 반복문
   for (int cam = 0; cam < nb_camera_; cam++) {
     // prepare the folder's name
+    
+    //setw(n): 출력에 사용할 필드의 널이
+    //setfill(c): 빈 공간을 c로 채운다
+    //0001, 0002과 같이 cam에 id를 부여
     std::stringstream ss;
     ss << std::setw(3) << std::setfill('0') << cam + 1;
-    std::string cam_nb = ss.str();
-    std::string cam_path = root_dir_ + cam_prefix_ + cam_nb;
+    std::string cam_nb = ss.str(); //cam_nb가 id 역할
+    std::string cam_path = root_dir_ + cam_prefix_ + cam_nb; //cam의 경로. cam_prefix는 "Cam_"(config 파일에서 설정) 
     LOG_INFO << "Extraction camera " << cam_nb;
 
     // iterate through the images for corner extraction
     std::vector<cv::String> fn;
-    cv::glob(cam_path + "/*.*", fn, true);
+    cv::glob(cam_path + "/*.*", fn, true); // glob(찾을 파일 경로, 찾은 파일 경로, recursive(true or false)
 
     // filter based on allowed extensions
+    // 위에서 정의한 확장자만 필터링
     std::vector<cv::String> fn_filtered;
     for (cv::String cur_path : fn) {
       std::size_t ext_idx = cur_path.find_last_of(".");
@@ -164,14 +187,19 @@ void Calibration::boardExtraction() {
     }
     fn = fn_filtered;
 
+    // 해당 카메라가 가지고 있는 이미지의 수 = frame의 수
     size_t count_frame =
         fn.size(); // number of allowed image files in images folder
+    
+    // frame 수만큼 반복문 돌면서 frame path 및 이미지를 matrix 형태로 저장(frame_path, currentIm)
     for (size_t frameind = 0; frameind < count_frame; frameind = frameind + 1) {
       // open Image
       cv::Mat currentIm = cv::imread(fn[frameind]);
       std::string frame_path = fn[frameind];
       // detect the checkerboard on this image
       LOG_DEBUG << "Frame index :: " << frameind;
+      
+      //이미지에서 board detection
       detectBoards(currentIm, cam, frameind, frame_path);
       LOG_DEBUG << frameind;
       // displayBoards(currentIm, cam, frameind); // Display frame
@@ -191,13 +219,15 @@ void Calibration::detectBoards(const cv::Mat image, const int cam_idx,
                                const std::string frame_path) {
   // Greyscale image for subpixel refinement
   cv::Mat graymat;
-  cv::cvtColor(image, graymat, cv::COLOR_BGR2GRAY);
+  cv::cvtColor(image, graymat, cv::COLOR_BGR2GRAY); //이미지를 Grayscale로 바꿔준다
 
   // Initialize image size
+  // 해당 이미지의 cols와 rows
   cams_[cam_idx]->im_cols_ = graymat.cols;
   cams_[cam_idx]->im_rows_ = graymat.rows;
 
   // Datastructure to save the checkerboard corners
+  // board 및 marker의 corner에 대한 id와 2d points
   std::map<int, std::vector<int>>
       marker_idx; // key == board id, value == markersIDs on MARKERS markerIds
   std::map<int, std::vector<std::vector<cv::Point2f>>>
@@ -210,17 +240,22 @@ void Calibration::detectBoards(const cv::Mat image, const int cam_idx,
 
   charuco_params_->adaptiveThreshConstant = 1;
 
+  // board의 수만큼 반복문
   for (int i = 0; i < nb_board_; i++) {
-    cv::aruco::detectMarkers(image, boards_3d_[i]->charuco_board_->dictionary,
+    // cv::aruco::detectMarkers( 마커를 찾을 이미지, marker의 type이 담긴 dictionary, marker의 corner 리스트(Nx4), marker의 id 리스트, DetectionParametes)
+    cv::aruco::detectMarkers(image, boards_3d_[i]->charuco_board_->dictionary, 
                              marker_corners[i], marker_idx[i],
                              charuco_params_); // detect markers
 
     if (marker_corners[i].size() > 0) {
+      // cv::aruco::interpolateCornersCharuco(marker의 corners 리스트, marker의 id 리스트, 이미지, board의 layout, board의 corner 리스트, board의 id 리스트, camera matrix, distortion 계수)
       cv::aruco::interpolateCornersCharuco(marker_corners[i], marker_idx[i],
                                            image, boards_3d_[i]->charuco_board_,
                                            charuco_corners[i], charuco_idx[i]);
     }
 
+    // board의 corner의 개수가 thereshold 이상일 때만 refinement(논문1)
+    // boards are discarded from further consideration
     if (charuco_corners[i].size() >
         (int)round(min_perc_pts_ * boards_3d_[i]->nb_pts_)) {
       LOG_INFO << "Number of detected corners :: " << charuco_corners[i].size();
@@ -230,17 +265,23 @@ void Calibration::detectBoards(const cv::Mat image, const int cam_idx,
         saddleSubpixelRefinement(graymat, charuco_corners[i], refined,
                                  corner_ref_window_, corner_ref_max_iter_);
         for (int j = 0; j < charuco_corners[i].size(); j++) {
+          //refinement의 x 혹은 y 좌표가 무한대면 break
           if (std::isinf(refined[j].x) || std::isinf(refined[j].y)) {
             break;
           }
+          // refinement한 값으로 업데이트
           charuco_corners[i][j].x = refined[j].x;
           charuco_corners[i][j].y = refined[j].y;
         }
       }
 
-      // Check for colinnerarity
+      // Check for colinnerarity(논문 1)
+      // 독립변수가 다른 독립변수들과 선형 독립이 아닌 경우를 의미
+      // 회귀 분석시 변수들 간의 관계가 클 경우 부정적인 영향을 미친다.
       std::vector<cv::Point2f> pts_on_board_2d;
-      pts_on_board_2d.reserve(charuco_idx[i].size());
+      pts_on_board_2d.reserve(charuco_idx[i].size()); //board의 corner 개수만큼 공간 할당
+
+      // board의 corner 개수만큼 반복문 돌며 3d point의 (x,y)를 pts_on_board_2d에 저장
       for (const auto &charuco_idx_at_board_id : charuco_idx[i]) {
         pts_on_board_2d.emplace_back(
             boards_3d_[i]->pts_3d_[charuco_idx_at_board_id].x,
@@ -248,13 +289,16 @@ void Calibration::detectBoards(const cv::Mat image, const int cam_idx,
       }
       double dum_a, dum_b, dum_c;
       double residual;
+      //residual을 계산
       calcLinePara(pts_on_board_2d, dum_a, dum_b, dum_c, residual);
 
       // Add the board to the datastructures (if it passes the collinearity
       // check)
+      // residual이 square size의 0.1보다 크고 board 내 corner의 개수가 4보다 클 때 data structure를 업데이트
       if ((residual > boards_3d_[i]->square_size_ * 0.1) &
           (charuco_corners[i].size() > 4)) {
         int board_idx = i;
+        // 새로운 data structure로 업데이트
         insertNewBoard(cam_idx, frame_idx, board_idx,
                        charuco_corners[board_idx], charuco_idx[board_idx],
                        frame_path);

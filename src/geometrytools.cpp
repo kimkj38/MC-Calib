@@ -122,17 +122,25 @@ triangulateNViewLinearEigen(const std::vector<cv::Point2f> Pts2D,
 void calcLinePara(std::vector<cv::Point2f> pts, double &a, double &b, double &c,
                   double &res) {
   res = 0;
-  cv::Vec4f line;
-  std::vector<cv::Point2f> ptsF;
-  ptsF.reserve(pts.size());
+  cv::Vec4f line; //데이터 개수4, 데이터 타입 float
+  std::vector<cv::Point2f> ptsF; //float point 2개
+  ptsF.reserve(pts.size()); //pts의 개수만큼 공간 할당
+
+  //반복문 돌면서 ptsF에 pts 넣어준다.
   for (const auto &pt : pts)
     ptsF.emplace_back(pt);
 
+  // L2 distance를 활용하여 오차를 최소화하는 line을 찾는다.
+  // cv::fitLine(points, output line, distType, param, reps, aeps)
+  // param: 일부 distance type에 활용되는 파라미터로 0일 때 optimal value가 선택된다.
+  // reps: 	Sufficient accuracy for the radius (distance between the coordinate origin and the line).
+  // aeps: Sufficient accuracy for the angle. 0.01 would be a good default value for reps and aeps.
   cv::fitLine(ptsF, line, cv::DistanceTypes::DIST_L2, 0, 1e-2, 1e-2);
   a = line[1];
   b = -line[0];
   c = line[0] * line[3] - line[1] * line[2];
 
+  //residual은 각 point들을 ax+by+c에 넣어 절대값을 취해 평균낸 값
   for (const auto &pt : pts) {
     double resid_ = fabs(pt.x * a + pt.y * b + c);
     res += resid_;
