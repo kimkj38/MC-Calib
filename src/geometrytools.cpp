@@ -598,6 +598,7 @@ cv::Mat ransacP3PDistortion(const std::vector<cv::Point3f> &scene_points,
 
     // multiply by K to go into cam ref (because the OpenCV function is so
     // broken ...)
+    // K를 직접 연산. imagePointUndis는 image plane에서의 좌표
     for (auto &imagePointUndis : imagePointsUndis) {
       imagePointUndis.x =
           imagePointUndis.x * float(intrinsic.at<double>(0, 0)) +

@@ -298,7 +298,7 @@ void Calibration::detectBoards(const cv::Mat image, const int cam_idx,
       if ((residual > boards_3d_[i]->square_size_ * 0.1) &
           (charuco_corners[i].size() > 4)) {
         int board_idx = i;
-        // 새로운 data structure로 업데이트
+        // data structure 업데이트
         insertNewBoard(cam_idx, frame_idx, board_idx,
                        charuco_corners[board_idx], charuco_idx[board_idx],
                        frame_path);
@@ -321,11 +321,16 @@ void Calibration::saveCamerasParams() {
           ? save_path_ + camera_params_file_name_
           : save_path_ + "calibrated_cameras_data.yml";
   cv::FileStorage fs(save_path_camera_params, cv::FileStorage::WRITE);
+  
+  // camera group별로 반복문
   for (const auto &it_cam_group : cam_group_) {
     std::shared_ptr<CameraGroup> cur_cam_group = it_cam_group.second;
+    // camera의 수 저장
     fs << "nb_camera" << nb_camera_;
+    // 그룹 내 카메라에 대해 반복문
     for (const auto &it_cam : cur_cam_group->cameras_) {
       std::shared_ptr<Camera> cur_cam = it_cam.second.lock();
+      // 카메라의 index, intrinsic matrix, distortion 등등 저장
       if (cur_cam) {
         fs << "camera_" + std::to_string(cur_cam->cam_idx_);
         cv::Mat cam_matrix;
@@ -356,12 +361,14 @@ void Calibration::saveCamerasParams() {
 void Calibration::save3DObj() {
   std::string save_path_object = save_path_ + "calibrated_objects_data.yml";
   cv::FileStorage fs(save_path_object, cv::FileStorage::WRITE);
-
+  // 각 object에 대해 반복문
   for (const auto &it_obj : object_3d_) {
     std::shared_ptr<Object3D> cur_object = it_obj.second;
+    // object id 저장
     fs << "object_" + std::to_string(cur_object->obj_id_);
     int obj_nb_pts = cur_object->nb_pts_;
     cv::Mat pts_mat(3, obj_nb_pts, CV_32FC1);
+    //object의 point의 수만큼 반복문 돌면 (x,y,z) 저장
     for (int i = 0; i < obj_nb_pts; i++) {
       cv::Point3f curr_pts = cur_object->pts_3d_[i];
       pts_mat.at<float>(0, i) = curr_pts.x;
@@ -389,6 +396,7 @@ void Calibration::save3DObjPose() {
     fs << "{";
     cv::Mat pose_mat(6, cur_object->object_observations_.size(), CV_64FC1);
     int a = 0;
+    // 각 object에 대한 rotation, translation parameter 저장
     for (const auto &it_obj_obs : cur_object->object_observations_) {
       std::shared_ptr<Object3DObs> cur_object_obs = it_obj_obs.second.lock();
       if (cur_object_obs) {
@@ -418,20 +426,25 @@ void Calibration::save3DObjPose() {
  */
 void Calibration::displayBoards(const cv::Mat image, const int cam_idx,
                                 const int frame_idx) {
+  //(카메라 index, frame index)의 pair를 cam_frame으로 정의
   std::pair<int, int> cam_frame = std::make_pair(cam_idx, frame_idx);
   std::map<std::pair<int, int>, std::shared_ptr<CameraObs>>::iterator it =
       cams_obs_.find(cam_frame); // Check if a frame exist
   if (it != cams_obs_.end()) {
+    // cams_obs_: calibration될 카메라로 key에 (카메라 index, frame index)
+    // bboard_observations_: board의 2d points
     for (const auto &it : cams_obs_[cam_frame]->board_observations_) {
       auto board_obs_ptr = it.second.lock();
       if (board_obs_ptr) {
         const std::vector<cv::Point2f> &current_pts = board_obs_ptr->pts_2d_;
+        // board observation에 대응되는 3d points
         std::shared_ptr<Board> board_3d_ptr = board_obs_ptr->board_3d_.lock();
         if (board_3d_ptr) {
-          std::array<int, 3> &color_temp = board_3d_ptr->color_;
+          std::array<int, 3> &color_temp = board_3d_ptr->color_; //display할 색상
           for (const auto &current_pt : current_pts) {
             LOG_DEBUG << "Pts x :: " << current_pt.x
                       << "   y :: " << current_pt.y;
+            // (x,y)에 대해 점 찍기
             cv::circle(image, cv::Point(current_pt.x, current_pt.y), 4,
                        cv::Scalar(color_temp[0], color_temp[1], color_temp[2]),
                        cv::FILLED, 8, 0);
@@ -462,39 +475,39 @@ void Calibration::insertNewBoard(const int cam_idx, const int frame_idx,
       cam_idx, frame_idx, board_idx, pts_2d, charuco_idx, cams_[cam_idx],
       boards_3d_[board_idx]);
 
-  // Add new board in the board list
+  // board 리스트에 추가
   board_observations_[board_observations_.size()] = new_board;
 
-  // Add board in the camera
+  // 카메라에 board 추가
   cams_[cam_idx]->insertNewBoard(new_board);
 
-  // Add board in the Board3D
+  // board 3D에 추가
   boards_3d_[board_idx]->insertNewBoard(new_board);
 
-  // Add board in the Frames list
+  // frame 리스트에 추가
   std::map<int, std::shared_ptr<Frame>>::iterator it = frames_.find(
-      frame_idx); // Check if a frame has already been initialize at this key?
+      frame_idx); // 해당 key에 대한 frame이 이미 initialize 되었는지 확인
   if (it != frames_.end()) {
     frames_[frame_idx]->insertNewBoard(
-        new_board); // If the key already exist just push a new board in there
+        new_board); // key가 이미 존재하면 push
     frames_[frame_idx]->frame_path_[cam_idx] = frame_path;
   } else {
     std::shared_ptr<Frame> newFrame =
         std::make_shared<Frame>(frame_idx, cam_idx, frame_path);
-    frames_[frame_idx] = newFrame; // Initialize the Frame if key does not exist
+    frames_[frame_idx] = newFrame; // key가 없으면 새로 만들어준다
     frames_[frame_idx]->insertNewBoard(new_board);
     cams_[cam_idx]->insertNewFrame(newFrame);
     boards_3d_[board_idx]->insertNewFrame(newFrame);
   }
 
-  // Add CamObs in the CamobsList and frame
+  // cam_obs에 추가. (카메라 index, frame index)로 구성된 cam_fram_idx가 key
   std::pair<int, int> cam_frame_idx = std::make_pair(cam_idx, frame_idx);
   std::map<std::pair<int, int>, std::shared_ptr<CameraObs>>::iterator itCamObs =
-      cams_obs_.find(cam_frame_idx); // Check if a Camobs has already been
-                                     // initialize at this key?
+      cams_obs_.find(cam_frame_idx); // key가 이미 있는지 확인
+  // 이미 존재하면 push
   if (itCamObs != cams_obs_.end()) {
-    // insert in list
     cams_obs_[cam_frame_idx]->insertNewBoard(new_board);
+  // 없으면 만들어준다
   } else {
     std::shared_ptr<CameraObs> new_cam_obs =
         std::make_shared<CameraObs>(new_board);
@@ -508,6 +521,7 @@ void Calibration::insertNewBoard(const int cam_idx, const int frame_idx,
  *
  * @param new_obj_obs pointer to the new object to be inserted
  */
+// 새로운 3d object 추가
 void Calibration::insertNewObjectObservation(
     std::shared_ptr<Object3DObs> new_obj_obs) {
   object_observations_[object_observations_.size()] = new_obj_obs;
@@ -522,6 +536,7 @@ void Calibration::insertNewObjectObservation(
  *
  */
 void Calibration::initializeCalibrationAllCam() {
+  // 파일이 비어있는지, 열 수 있는지 등 확인
   if (!cam_params_path_.empty() && cam_params_path_ != "None") {
     cv::FileStorage fs;
     const bool is_file_available =
@@ -532,12 +547,14 @@ void Calibration::initializeCalibrationAllCam() {
                 << "' doesn't exist.";
       return;
     }
+    //precalibrated parameter 담긴 파일 열기
     fs.open(cam_params_path_, cv::FileStorage::READ);
 
     LOG_INFO << "Initializing camera calibration from " << cam_params_path_;
 
     for (const auto &it : cams_) {
       // extract camera matrix and distortion coefficients from the file
+      // intrinsic 행렬과 distortion 계수 불러오기
       cv::FileNode loaded_cam_params = fs["camera_" + std::to_string(it.first)];
 
       cv::Mat camera_matrix;
@@ -545,6 +562,7 @@ void Calibration::initializeCalibrationAllCam() {
       loaded_cam_params["camera_matrix"] >> camera_matrix;
       loaded_cam_params["distortion_vector"] >> distortion_coeffs;
 
+      // 불러온 값들로 초기 setting
       it.second->setIntrinsics(camera_matrix, distortion_coeffs);
     }
 
@@ -552,7 +570,8 @@ void Calibration::initializeCalibrationAllCam() {
     LOG_INFO << "Initializing camera calibration using images";
 
     for (const auto &it : cams_)
-      it.second->initializeCalibration();
+      // check!(Intrinsic initilization 하는 부분)
+      it.second->initializeCalibration(); 
   }
 }
 
@@ -562,6 +581,8 @@ void Calibration::initializeCalibrationAllCam() {
  * It is based on a PnP algorithm.
  *
  */
+
+// check(ransac으로 pose 추정)
 void Calibration::estimatePoseAllBoards() {
   for (const auto &it : board_observations_)
     it.second->estimatePose(ransac_thresh_, nb_iterations_);
@@ -572,6 +593,8 @@ void Calibration::estimatePoseAllBoards() {
  * individually
  *
  */
+
+// check(intrinsic을 refinement)
 void Calibration::refineIntrinsicAndPoseAllCam() {
   for (const auto &it : cams_)
     it.second->refineIntrinsicCalibration(nb_iterations_);
@@ -581,6 +604,8 @@ void Calibration::refineIntrinsicAndPoseAllCam() {
  * @brief Compute the reprojection error for each boards
  *
  */
+
+// check(reprojection error 계산)
 void Calibration::computeReproErrAllBoard() {
   std::vector<float> err_vec;
   float sum_err = 0;

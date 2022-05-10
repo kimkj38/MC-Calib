@@ -173,11 +173,15 @@ void Camera::initializeCalibration() {
 
   // nb of boards used for the initial estimation of intrinsic parameters
   //(at least 50 boards for perspective)
+  // 사용하는 initialization 모델들이 이미지가 많으면 너무 느려서 subsampling(논문2)
   int nb_board_est = 50;
+
+  // distortion_model 1일 때 Kannalla(for fish eye), 0일 때 Brown(for perspective)
   if (distortion_model_ == 1) {
     nb_board_est =
         500; // fisheye is more sensitive and require more img (but faster)
   }
+  // nb_board_est가 board의 수보다 크면 board의 수로 맞춘다
   if (indbv.size() < nb_board_est)
     nb_board_est = indbv.size();
 
@@ -186,10 +190,13 @@ void Camera::initializeCalibration() {
   std::vector<std::vector<cv::Point2f>> img_points;
   obj_points.reserve(nb_board_est);
   img_points.reserve(nb_board_est);
+  
+  //subsampling한 수만큼 반복
   for (int i = 0; i < nb_board_est; i++) {
     std::shared_ptr<BoardObs> board_obs_temp =
         board_observations_[indbv[shuffled_board_ind[i]]].lock();
     if (board_obs_temp) {
+      //img_points에 board의 2d points push
       img_points.emplace_back(board_obs_temp->pts_2d_);
       const std::vector<int> &corners_idx_temp = board_obs_temp->charuco_id_;
       std::shared_ptr<Board> board_3d_ptr = board_obs_temp->board_3d_.lock();
@@ -198,6 +205,7 @@ void Camera::initializeCalibration() {
         pts_3d_temp.reserve(corners_idx_temp.size());
         for (const auto &corner_idx_temp : corners_idx_temp)
           pts_3d_temp.emplace_back(board_3d_ptr->pts_3d_[corner_idx_temp]);
+        // obj_points에 3d points push
         obj_points.emplace_back(pts_3d_temp);
       }
     }
@@ -235,17 +243,20 @@ void Camera::refineIntrinsicCalibration(const int nb_iterations) {
   LOG_INFO << "Parameters before optimization :: " << this->getCameraMat();
   LOG_INFO << "distortion vector :: " << getDistortionVectorVector();
   for (const auto &it : board_observations_) {
-    std::shared_ptr<BoardObs> board_obs_ptr = it.second.lock();
+    std::shared_ptr<BoardObs> board_obs_ptr = it.second.lock(); // board의 2d points에 대한 주소
     if (board_obs_ptr && board_obs_ptr->valid_ == true) {
-      std::shared_ptr<Board> board_3d_ptr = board_obs_ptr->board_3d_.lock();
+      std::shared_ptr<Board> board_3d_ptr = board_obs_ptr->board_3d_.lock(); // 2d points에 대응하는 3d board
       if (board_3d_ptr) {
-        const std::vector<cv::Point3f> &board_pts_3d = board_3d_ptr->pts_3d_;
-        const std::vector<int> &board_pts_idx = board_obs_ptr->charuco_id_;
-        const std::vector<cv::Point2f> &board_pts_2d = board_obs_ptr->pts_2d_;
+        const std::vector<cv::Point3f> &board_pts_3d = board_3d_ptr->pts_3d_; // board의 3d points
+        const std::vector<int> &board_pts_idx = board_obs_ptr->charuco_id_; // board의 charuco id
+        const std::vector<cv::Point2f> &board_pts_2d = board_obs_ptr->pts_2d_; // board의 2d points
+        // points의 개수만큼 반복문
         for (int i = 0; i < board_pts_idx.size(); i++) {
           cv::Point3f current_pts_3d =
               board_pts_3d[board_pts_idx[i]];           // Current 3D pts
           cv::Point2f current_pts_2d = board_pts_2d[i]; // Current 2D pts
+          
+          //2d point와 3d point를 받아 reprojection error로 계산
           ceres::CostFunction *reprojection_error = ReprojectionError::Create(
               double(current_pts_2d.x), double(current_pts_2d.y),
               double(current_pts_3d.x), double(current_pts_3d.y),

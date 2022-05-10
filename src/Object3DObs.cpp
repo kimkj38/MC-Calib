@@ -219,17 +219,19 @@ cv::Mat Object3DObs::getTransInGroupVec() const {
 void Object3DObs::estimatePose(const float ransac_thresh,
                                const int ransac_iterations) {
   std::vector<cv::Point3f> object_pts_temp;
-  object_pts_temp.reserve(pts_id_.size());
+  object_pts_temp.reserve(pts_id_.size()); //pts_id: object의 id
+  // object의 수만큼 반복
   for (const auto &pt_id : pts_id_) {
     auto object_3d_ptr = object_3d_.lock();
     if (object_3d_ptr)
+      // object_pts_temp에 3d point push
       object_pts_temp.emplace_back(object_3d_ptr->pts_3d_[pt_id]);
   }
 
   // Estimate the pose using a RANSAC
-  cv::Mat r_vec(1, 3, CV_64F);
-  cv::Mat t_vec(1, 3, CV_64F);
-  std::shared_ptr<Camera> cam_ptr = cam_.lock();
+  cv::Mat r_vec(1, 3, CV_64F); // roation
+  cv::Mat t_vec(1, 3, CV_64F); // tranlation
+  std::shared_ptr<Camera> cam_ptr = cam_.lock(); // cam_: object에 해당하는 카메라
   if (cam_ptr) {
     cv::Mat inliers = ransacP3PDistortion(
         object_pts_temp, pts_2d_, cam_ptr->getCameraMat(),
@@ -250,13 +252,13 @@ void Object3DObs::estimatePose(const float ransac_thresh,
  * @return mean reprojection error for this observation
  */
 float Object3DObs::computeReprojectionError() const {
-  float sum_err_object = 0.0;
+  float sum_err_object = 0.0; //error 초기화
   std::vector<cv::Point3f> object_pts_temp;
   object_pts_temp.reserve(pts_id_.size());
   for (const auto &pt_id : pts_id_) {
     auto object_3d_ptr = object_3d_.lock();
     if (object_3d_ptr)
-      object_pts_temp.emplace_back(object_3d_ptr->pts_3d_[pt_id]);
+      object_pts_temp.emplace_back(object_3d_ptr->pts_3d_[pt_id]); //3d points
   }
 
   // Project the 3D pts on the image
@@ -264,15 +266,17 @@ float Object3DObs::computeReprojectionError() const {
   std::vector<float> error_object_vec;
   std::shared_ptr<Camera> cam_ptr = cam_.lock();
   if (cam_ptr) {
+    // rotation, translation, intrinsic, distortion 받아서 3d points를 image로 projection한 output이 repro_pts
     projectPointsWithDistortion(object_pts_temp, getRotVec(), getTransVec(),
                                 cam_ptr->getCameraMat(),
                                 cam_ptr->getDistortionVectorVector(), repro_pts,
                                 cam_ptr->distortion_model_);
+    // 모든 points에 대해 norm2로 error 계산
     for (int j = 0; j < repro_pts.size(); j++) {
       float rep_err = std::sqrt(std::pow((pts_2d_[j].x - repro_pts[j].x), 2) +
                                 std::pow((pts_2d_[j].y - repro_pts[j].y), 2));
-      error_object_vec.push_back(rep_err);
-      sum_err_object += rep_err;
+      error_object_vec.push_back(rep_err); // error_object_vec에 push
+      sum_err_object += rep_err; //sum_err_object는 error의 총합
       // if (rep_err > 6.0)
       // LOG_WARNING << "LARGE REPROJECTION ERROR ::: " << rep_err  ;
     }
