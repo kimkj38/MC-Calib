@@ -39,6 +39,7 @@ void Graph::addEdge(const int v1, const int v2, const double weight) {
 void Graph::addVertex(const int vertex) {
   // create a new vertex only when no vertex with the same name (i.e.
   // boost::vertex_name_t) is available
+  // 동일한 vertex가 없을 때만 추가
   if (idx_to_vertex_.find(vertex) != idx_to_vertex_.end()) {
     LOG_WARNING << "Vertex {" << vertex
                 << "} is not added because it exists in the graph";

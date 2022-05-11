@@ -621,30 +621,38 @@ void Calibration::computeReproErrAllBoard() {
  * If two boards appears in a single image their interpose can be computed and
  * stored.
  */
+// 하나의 카메라에서 관측되는 모든 카메라 간의 pose를 추정
 void Calibration::computeBoardsPairPose() {
   board_pose_pairs_.clear();
+  // cams_obs_: calibration 될 카메라. key=(camera idx/frame idx)
   for (const auto &it : cams_obs_) {
     std::shared_ptr<CameraObs> current_board = it.second;
-    const std::vector<int> &BoardIdx = current_board->board_idx_;
+    const std::vector<int> &BoardIdx = current_board->board_idx_; //해당 frame, camera로 보이는 3D board의 인덱스
 
-    if (BoardIdx.size() > 1) // if more than one board is visible
+    if (BoardIdx.size() > 1) // board가 여러개 보이는 경우
     {
+      // 관측되는 board들 2중 for문 돌면서 id 부여.
       for (const auto &it1 : current_board->board_observations_) {
         auto board1_obs_ptr = it1.second.lock();
         if (board1_obs_ptr) {
-          int boardid1 = board1_obs_ptr->board_id_;
+          int boardid1 = board1_obs_ptr->board_id_; 
           for (const auto &it2 : current_board->board_observations_) {
             auto board2_obs_ptr = it2.second.lock();
             if (board2_obs_ptr) {
               int boardid2 = board2_obs_ptr->board_id_;
+
+              // 각 board의 카메라와의 pose를 proj_1, proj_2로 정의
               cv::Mat proj_1 = board1_obs_ptr->getPoseMat();
+              // 자기 자신과의 관계는 무시
               if (boardid1 != boardid2) // We do not care about the
                                         // transformation with itself ...
               {
                 cv::Mat proj_2 = board2_obs_ptr->getPoseMat();
-                cv::Mat inter_board_pose = proj_2.inv() * proj_1;
+                cv::Mat inter_board_pose = proj_2.inv() * proj_1; // 순환 구조 활용해서 board 간의 pose 계산
+                // cam_idx_pair는 (board1의 id, board2의 id)
                 std::pair<int, int> cam_idx_pair =
                     std::make_pair(boardid1, boardid2);
+                // board_pose_pair에 push. key = (boardind1,boardind2), value = (boardind1,boardind2)
                 board_pose_pairs_[cam_idx_pair].push_back(inter_board_pose);
                 LOG_DEBUG << "Multiple boards detected";
               }
@@ -667,26 +675,33 @@ void Calibration::computeBoardsPairPose() {
  * @param inter_transform from {inter_board_transform_, inter_camera_transform_,
  * inter_object_transform_}
  */
+
+// pose는 각 프레임에서 계산되어 중위값으로 결정된다(논문3)
+// pose pairs에는 board-board, camera-camera, object-object에 대한 pairs가 inter_transform에는 pose가 담겨있다.
 void Calibration::initInterTransform(
     const std::map<std::pair<int, int>, std::vector<cv::Mat>> &pose_pairs,
     std::map<std::pair<int, int>, cv::Mat> &inter_transform) {
   inter_transform.clear();
+
   for (const auto &it : pose_pairs) {
     const std::pair<int, int> &pair_idx = it.first;
     const std::vector<cv::Mat> &poses_temp = it.second;
-    cv::Mat average_rotation = cv::Mat::zeros(3, 1, CV_64F);
-    cv::Mat average_translation = cv::Mat::zeros(3, 1, CV_64F);
+    cv::Mat average_rotation = cv::Mat::zeros(3, 1, CV_64F); //rotation을 matrix 공간
+    cv::Mat average_translation = cv::Mat::zeros(3, 1, CV_64F); //translation을 위한 matirx 공간
 
     // Median
     const size_t num_poses = poses_temp.size();
     std::vector<double> r1, r2, r3;
     std::vector<double> t1, t2, t3;
+    // 각 element에 pose의 개수만큼 공간 확보
     r1.reserve(num_poses);
     r2.reserve(num_poses);
     r3.reserve(num_poses);
     t1.reserve(num_poses);
     t2.reserve(num_poses);
     t3.reserve(num_poses);
+    
+    // 모든 pose들의 R,T에 대한 요소들을 push 
     for (const auto &pose_temp : poses_temp) {
       cv::Mat R, T;
       Proj2RT(pose_temp, R, T);
@@ -697,6 +712,7 @@ void Calibration::initInterTransform(
       t2.push_back(T.at<double>(1));
       t3.push_back(T.at<double>(2));
     }
+    // 중위값으로 계산
     average_rotation.at<double>(0) = median(r1);
     average_rotation.at<double>(1) = median(r2);
     average_rotation.at<double>(2) = median(r3);
@@ -704,6 +720,7 @@ void Calibration::initInterTransform(
     average_translation.at<double>(1) = median(t2);
     average_translation.at<double>(2) = median(t3);
 
+    //
     inter_transform[pair_idx] =
         RVecT2Proj(average_rotation, average_translation);
     LOG_DEBUG << "Average Rot :: " << average_rotation
@@ -715,11 +732,14 @@ void Calibration::initInterTransform(
  * @brief Initialize the graph with the poses between boards
  *
  */
+// inter-board poses를 3D object로 구성하기 위해 directed weighted graph에 저장한다.(논문4)
 void Calibration::initInterBoardsGraph() {
 
+  // covis_boards_garph: board간 관계에 대한 그래프. vertex: boardId, edge: number of co-visibility
   covis_boards_graph_.clearGraph();
 
   // Each board is a vertex if it has been observed at least once
+  // 한 벝이라도 관측되는 board는 vertex로 추가
   for (const auto &it : boards_3d_) {
     if (it.second->board_observations_.size() > 0) {
       covis_boards_graph_.addVertex(it.second->board_id_);
@@ -729,6 +749,7 @@ void Calibration::initInterBoardsGraph() {
   for (const auto &it : board_pose_pairs_) {
     const std::pair<int, int> &board_pair_idx = it.first;
     const std::vector<cv::Mat> &board_poses_temp = it.second;
+    // addEdge(v1, v2, weight)로 두 board가 함께 보이는 빈도의 역수를 weight로 저장한다.(다익스트라 알고리즘 통해 shortest path를 찾아 그룹화해주기 때문에 역수로 가중치)
     covis_boards_graph_.addEdge(board_pair_idx.first, board_pair_idx.second,
                                 ((double)1 / board_poses_temp.size()));
   }
