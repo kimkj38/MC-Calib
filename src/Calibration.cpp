@@ -749,7 +749,8 @@ void Calibration::initInterBoardsGraph() {
   for (const auto &it : board_pose_pairs_) {
     const std::pair<int, int> &board_pair_idx = it.first;
     const std::vector<cv::Mat> &board_poses_temp = it.second;
-    // addEdge(v1, v2, weight)로 두 board가 함께 보이는 빈도의 역수를 weight로 저장한다.(다익스트라 알고리즘 통해 shortest path를 찾아 그룹화해주기 때문에 역수로 가중치)
+    // addEdge(v1, v2, weight)로 두 board가 함께 보이는 빈도의 역수를 weight로 저장한다. (논문 5)
+    // 다익스트라 알고리즘 통해 shortest path를 찾기 때문에 역수로 가중치 = 같이 보이는 횟수가 많을수록 가깝다고 가정
     covis_boards_graph_.addEdge(board_pair_idx.first, board_pair_idx.second,
                                 ((double)1 / board_poses_temp.size()));
   }
@@ -762,68 +763,88 @@ void Calibration::initInterBoardsGraph() {
  * is formed of multiple board which are not necessarily physically connected
  * together
  */
+
+// 
 void Calibration::init3DObjects() {
   // Find the connected components in the graph (each connected components is a
   // new 3D object)
+  // connect_comp는 그래프 상에서 연결된 것들. 즉, 3D object로 정의될 것들
   std::vector<std::vector<int>> connect_comp =
       covis_boards_graph_.connectedComponents();
   LOG_DEBUG << "Number of 3D objects detected :: " << connect_comp.size();
 
   // Declare a new 3D object for each connected component
+  //
+  // connect_comp의 개수만큼 반복문
   for (int i = 0; i < connect_comp.size(); i++) {
     LOG_DEBUG << "Obj Id :: " << i;
     LOG_DEBUG << "Number of boards in this object :: "
               << connect_comp[i].size();
 
     // Find the reference board in this object
+    // reference board는 그룹 중 인덱스가 가장 작은 board
     int ref_board_id =
         *min_element(connect_comp[i].begin(), connect_comp[i].end());
 
     // Declare a new 3D object
+    // newObject3D. 3D object에는 board의 수, point의 수, color, 3d object id, ref_board id가 담긴다
     std::shared_ptr<Object3D> newObject3D =
         std::make_shared<Object3D>(connect_comp[i].size(), ref_board_id, i,
                                    boards_3d_[ref_board_id]->color_);
     int pts_count = 0;
 
     // Compute the shortest path between the reference and the other board
+    // 3D object 내 board의 개수만큼 반복문
     for (int j = 0; j < connect_comp[i].size(); j++) {
-      int current_board_id = connect_comp[i][j];
-      newObject3D->insertBoardInObject(boards_3d_[current_board_id]);
+      int current_board_id = connect_comp[i][j]; // 현재 board의 id
+      newObject3D->insertBoardInObject(boards_3d_[current_board_id]); // newObject3D에 현재 board에 대한 포인터와 그 board가 가진 points가 담긴다
 
       // Compute the transformation between the reference board and the other
       // boards in the object if the board is not the referential board compute
       // the path
+      //  ref_board와 현재 board 간의 shortest path를 구한다(다익스트라)
       std::vector<int> short_path = covis_boards_graph_.shortestPathBetween(
           ref_board_id, current_board_id);
       // Compute the transformation wrt. the reference board
+      // Transform 행렬 단위행렬로 초기화
       cv::Mat transform = (cv::Mat_<double>(4, 4) << 1, 0, 0, 0, 0, 1, 0, 0, 0,
                            0, 1, 0, 0, 0, 0,
                            1); // initialize the transformation to identity
+
+      // shortest path를 반복문을 통해 탐색
       for (int k = 0; k < short_path.size() - 1; k++) {
-        int current_board = short_path[k];
-        int next_board = short_path[k + 1];
+        int current_board = short_path[k]; //현재 board
+        int next_board = short_path[k + 1]; //이동하는 다음 board
+        // 두 board를 pair로 만들어준다
         std::pair<int, int> board_pair_idx =
             std::make_pair(current_board, next_board);
+        // current_trans: current에서 next로 가는 transformation
         cv::Mat current_trans = inter_board_transform_[board_pair_idx];
+        // next에서 ref로 가는 transformation 반복적으로 업데이트
         transform = transform * current_trans.inv();
       }
 
       // Store the relative board transformation in the object
+      // object 내의 boards 간의 transformation 정보를  newObject3D에 담아준다
       newObject3D->setBoardPoseMat(transform, current_board_id);
 
       // Transform the 3D pts to push in the object 3D
       std::vector<cv::Point3f> trans_pts =
+          // transform3DPts에서 3d points를 transformation 해준다.
           transform3DPts(boards_3d_[current_board_id]->pts_3d_,
                          newObject3D->getBoardRotVec(current_board_id),
                          newObject3D->getBoardTransVec(current_board_id));
+      
       // Make a indexing between board to object
+      // points의 수만큼 반복문
       for (int k = 0; k < trans_pts.size(); k++) {
-        int char_id = k;
+        int char_id = k; 
+        //boardid_charid = (현재 board의 id, k로 인덱싱한 point id)
         std::pair<int, int> boardid_charid =
             std::make_pair(current_board_id, char_id);
-        newObject3D->pts_board_2_obj_[boardid_charid] = pts_count;
-        newObject3D->pts_obj_2_board_.push_back(boardid_charid);
-        newObject3D->pts_3d_.push_back(trans_pts[k]);
+        newObject3D->pts_board_2_obj_[boardid_charid] = pts_count; // key(board_ind,pts_ind) --> pts_ind_obj
+        newObject3D->pts_obj_2_board_.push_back(boardid_charid);   // key(boardid//ptsid)-->pts_ind_board
+        newObject3D->pts_3d_.push_back(trans_pts[k]); //transformation한 3d points push
         pts_count++;
       }
       LOG_DEBUG << "Board ID :: " << current_board_id;
@@ -845,7 +866,7 @@ void Calibration::init3DObjectObs(const int object_idx) {
 
   // Iterate through cameraobs
   for (const auto &it_cam_obs : cams_obs_) {
-    std::pair<int, int> cam_id_frame_id = it_cam_obs.first; // Cam ind/Frame ind
+    std::pair<int, int> cam_id_frame_id = it_cam_obs.first; // cams_obs. key = (Cam ind,Frame ind)
     std::shared_ptr<CameraObs> current_camobs = it_cam_obs.second;
 
     // Declare the 3D object observed in this camera observation
@@ -854,12 +875,14 @@ void Calibration::init3DObjectObs(const int object_idx) {
         std::make_shared<Object3DObs>(object_3d_[object_idx], object_idx);
 
     // Check the boards observing this camera
+    // current_baord_obs: 현재 frame, camera에서 관측되는 boards
     std::map<int, std::weak_ptr<BoardObs>> current_board_obs =
         current_camobs->board_observations_;
     for (const auto &it_board_obs : current_board_obs) {
       auto board_obs_ptr = it_board_obs.second.lock();
       if (board_obs_ptr) {
         // Check if this board correspond to the object of interest
+        // board가 현재 camera에서 관측되는 object에 속하면 push
         std::map<int, std::weak_ptr<Board>>::iterator it =
             object_3d_[object_idx]->boards_.find(board_obs_ptr->board_id_);
         if (it != object_3d_[object_idx]
@@ -975,15 +998,18 @@ void Calibration::computeCamerasPairPose() {
  * @brief Initialize the relationship graph between cameras to form groups
  *
  */
+// 카메라 간의 그래프 initialize
 void Calibration::initInterCamerasGraph() {
   covis_camera_graph_.clearGraph();
   // Each camera is a vertex if it has observed at least one object
   for (const auto &it : this->cams_) {
     if (it.second->board_observations_.size() > 0) {
-      covis_camera_graph_.addVertex(it.second->cam_idx_);
+      covis_camera_graph_.addVertex(it.second->cam_idx_); //카메라의 id로 vertex 추가
     }
   }
   // Build the graph with cameras' pairs
+  // camera_pose_pairs. key: (boardind1,boardind2) value: Vector of poses
+  // 카메라 pair를 통해 엣지 추가 
   for (const auto &it : camera_pose_pairs_) {
     const std::pair<int, int> &camera_pair_idx = it.first;
     const std::vector<cv::Mat> &camera_poses_temp = it.second;
@@ -996,39 +1022,50 @@ void Calibration::initInterCamerasGraph() {
  * @brief Initialize camera group based on co-visibility pair between cameras
  *
  */
+// 카메라 그룹화 initialize
 void Calibration::initCameraGroup() {
   // Find the connected components in the graph (each connected components is a
   // new camera group)
+  // 그래프에서 연결된 카메라들끼리 connect_comp로 정의
   std::vector<std::vector<int>> connect_comp =
       covis_camera_graph_.connectedComponents();
   LOG_DEBUG << "Number of camera group detected :: " << connect_comp.size();
 
   // Declare a new camera group for each connected component
+  // 카메라 그룹에 대해 반복문
   for (int i = 0; i < connect_comp.size(); i++) {
     LOG_DEBUG << "camera group id :: " << i;
     LOG_DEBUG << "Number of cameras in the group :: " << connect_comp.size();
 
     // Find the reference camera in this group
+    // 가장 작은 인덱스를 가지는 카메라가 ref_camera
     int id_ref_cam =
         *min_element(connect_comp[i].begin(), connect_comp[i].end());
 
     // Declare a new camera group
+    // ref_cam의 id와 다른 카메라의 id로 구성되는 new_camera_group 선언
     std::shared_ptr<CameraGroup> new_camera_group =
         std::make_shared<CameraGroup>(id_ref_cam, i);
 
     // Compute the shortest path between the reference and the other cams
+    // 다익스트라 알고리즘 통해 ref_camera와 다른 카메라들 간의 최소거리 계산
+
+    // 각 그룹 내 카메라에 대해 반복문
     for (int j = 0; j < connect_comp[i].size(); j++) {
       int current_camera_id = connect_comp[i][j];
-      new_camera_group->insertCamera(cams_[current_camera_id]);
+      new_camera_group->insertCamera(cams_[current_camera_id]); //new_camera_group에 현재 카메라 추가
 
       // Compute the transformation between the reference cam and the other
       // cam in the group
+      // ref_camera와 현재 카메라의 최소거리 찾기
       std::vector<int> short_path = covis_camera_graph_.shortestPathBetween(
           id_ref_cam, current_camera_id);
       // Compute the transformation wrt. the reference camera
+      // transformation 행렬 초기화
       cv::Mat transform =
           (cv::Mat_<double>(4, 4) << 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0,
            0, 1); // initialize the transformation to identity
+      // path를 돌면서 ref_camera와 현재 카메라 사이의 transformation 업데이트
       for (int k = 0; k < short_path.size() - 1; k++) {
         int current_cam = short_path[k];
         int next_cam = short_path[k + 1];
@@ -1039,38 +1076,45 @@ void Calibration::initCameraGroup() {
         transform = transform * current_trans;
       }
       // Store the relative camera transformation in the object
+      // new_camera_croupt에 transformation 행렬 정보 추가
       new_camera_group->setCameraPoseMat(transform, current_camera_id);
     }
     // Add the 3D camera group into the structure
+    // camera group에 새로운 그룹 추가
     cam_group_[i] = new_camera_group;
   }
 }
 
 /**
- * @brief Initialize camera group observation
+ * @brief Initialize camera group o bservation
  *
  * @param camera_group_idx camera group index
  */
 void Calibration::initCameraGroupObs(const int camera_group_idx) {
   // List of camera idx in the group
+  // 카메라 그룹 내 카메라들의 index
   const std::vector<int> &cam_in_group = cam_group_[camera_group_idx]->cam_idx;
 
   // Iterate through frame
+  // frame 별로 반복문
   for (const auto &it_frame : frames_) {
     int current_frame_id = it_frame.second->frame_idx_;
     std::shared_ptr<CameraGroupObs> new_cam_group_obs =
         std::make_shared<CameraGroupObs>(
             cam_group_[camera_group_idx]); // declare a new observation
 
+    // current_object_obs: 현재 frame에서 관측되는 boards
     std::map<int, std::weak_ptr<Object3DObs>> current_object_obs =
         it_frame.second->object_observations_;
+    // 관측되는 boards에 대해 반복문
     for (const auto &it_obj_obs : current_object_obs) {
       auto obj_obs_ptr = it_obj_obs.second.lock();
       if (obj_obs_ptr) {
-        int current_cam_id = obj_obs_ptr->camera_id_;
-        int current_obj_id = obj_obs_ptr->object_3d_id_;
+        int current_cam_id = obj_obs_ptr->camera_id_; //해당 board를 관측하는 camera의 id(여러개??)
+        int current_obj_id = obj_obs_ptr->object_3d_id_; //해당 board의 id
 
         // Check if this camera id belongs to the group
+        // camera id가 그룹 내에 속하는지 확인
         if (std::find(cam_in_group.begin(), cam_in_group.end(),
                       current_cam_id) != cam_in_group.end()) {
           // if (count(cam_in_group.begin(), cam_in_group.end(),
@@ -1078,6 +1122,7 @@ void Calibration::initCameraGroupObs(const int camera_group_idx) {
           // {
           // the camera is in the group so this object is visible in the cam
           // group udpate the observation
+          // 카메라가 그룹에 속하면 CameraGroupObs에 추가
           new_cam_group_obs->insertObjectObservation(obj_obs_ptr);
 
           // push the object observation in the camera group
@@ -1104,6 +1149,7 @@ void Calibration::initCameraGroupObs(const int camera_group_idx) {
  * @brief Initialize all the camera groups observations
  *
  */
+// 카메라 그룹별로 반복문 돌며 observation initialize
 void Calibration::initAllCameraGroupObs() {
   for (const auto &it : cam_group_) {
     int camera_group_idx = it.second->cam_group_idx_;
@@ -1119,10 +1165,11 @@ void Calibration::initAllCameraGroupObs() {
 void Calibration::refineAllCameraGroup() {
   for (const auto &it : cam_group_) {
     // it->second->computeObjPoseInCameraGroup();
-    it.second->refineCameraGroup(nb_iterations_);
+    it.second->refineCameraGroup(nb_iterations_); //check!
   }
 
   // Update the object3D observation
+  // Object3D의 Rotation, Translation 행렬 업데이트
   for (const auto &it : cams_group_obs_)
     it.second->updateObjObsPose();
 }
@@ -1137,6 +1184,7 @@ void Calibration::refineAllCameraGroup() {
 void Calibration::findPairObjectForNonOverlap() {
   no_overlap_object_pair_.clear();
   // Iterate through the camera groups
+  // 카메라 그룹에 대해 이중 반복문 통해 두 개의 그룹 선택
   for (const auto &it_groups_1 : cam_group_) {
     int group_idx1 = it_groups_1.first;
     for (const auto &it_groups_2 : cam_group_) {

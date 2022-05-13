@@ -189,25 +189,29 @@ void CameraGroup::refineCameraGroup(const int nb_iterations) {
   LOG_INFO << "Number of frames for camera group optimization  :: "
            << frames_.size();
   // Iterate through frames
+  // frame 별로 반복문
   for (const auto &it_frame : frames_) {
     auto frame_ptr = it_frame.second.lock();
     if (frame_ptr) {
       // Iterate through cameraGroupObs
       std::map<int, std::weak_ptr<CameraGroupObs>> current_cam_group_obs_vec =
-          frame_ptr->cam_group_observations_;
+          frame_ptr->cam_group_observations_; //해당 frame에서의 카메라 그룹
+      // 카메라 group별로 반복문
       for (const auto &it_cam_group_obs : current_cam_group_obs_vec) {
         auto cam_group_obs_ptr = it_cam_group_obs.second.lock();
         if (cam_group_obs_ptr) {
           // Check if the current group the group we refine (be careful)
           if (cam_group_idx_ == cam_group_obs_ptr->cam_group_idx_) {
             // iterate through 3D object obs
+            
             std::map<int, std::weak_ptr<Object3DObs>> current_obj3d_obs_vec =
                 cam_group_obs_ptr->object_observations_;
+            // 현재 프레임에서 어떤 카메라 그룹에서 관측되는 boards들에 대해 반복문
             for (const auto &it_obj3d : current_obj3d_obs_vec) {
               std::shared_ptr<Object3DObs> it_obj3d_ptr =
                   it_obj3d.second.lock();
               if (it_obj3d_ptr) {
-                int current_cam_id = it_obj3d_ptr->camera_id_;
+                int current_cam_id = it_obj3d_ptr->camera_id_; //해당 board를 관측하는 camera의 id(여러 개의 카메라가 보고 있다면?)
                 auto object_3d_ptr = it_obj3d_ptr->object_3d_.lock();
                 if (object_3d_ptr) {
                   const std::vector<cv::Point3f> &obj_pts_3d =
@@ -228,14 +232,17 @@ void CameraGroup::refineCameraGroup(const int nb_iterations) {
                     double r3 = cam_ptr->intrinsics_[8];
                     bool refine_cam = true;
                     // We do not refine the camera pose if it is the ref camera
+                    // ref_cam에 대해서는 refine하지 않는다.
                     if (this->id_ref_cam_ == cam_ptr->cam_idx_)
                       refine_cam = false;
+                    // 모든 points에 대해 반복문
                     for (int i = 0; i < obj_pts_idx.size(); i++) {
                       cv::Point3f current_pts_3d =
                           obj_pts_3d[obj_pts_idx[i]]; // Current 3D pts
                       cv::Point2f current_pts_2d =
                           obj_pts_2d[i]; // Current 2D pts
                       ceres::CostFunction *reprojection_error =
+                          // check!
                           ReprojectionError_CameraGroupRef::Create(
                               double(current_pts_2d.x),
                               double(current_pts_2d.y),
