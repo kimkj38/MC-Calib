@@ -158,9 +158,11 @@ void Object3D::refineObject(const int nb_iterations) {
   ceres::Problem problem;
 
   // Iterate through the object obs
+  // object_observations에 대해 반복문
   for (const auto &it_obj_obs : object_observations_) {
     std::shared_ptr<Object3DObs> current_object_obs = it_obj_obs.second.lock();
     if (current_object_obs) {
+      // board_observations에 대해 반복문
       for (const auto &it_board_obs : current_object_obs->board_observations_) {
         auto board_obs_ptr = it_board_obs.second.lock();
         if (board_obs_ptr && board_obs_ptr->valid_ == true) {
@@ -171,7 +173,9 @@ void Object3D::refineObject(const int nb_iterations) {
             const std::vector<int> &board_pts_idx = board_obs_ptr->charuco_id_;
             const std::vector<cv::Point2f> &board_pts_2d =
                 board_obs_ptr->pts_2d_;
+            // board_observation을 보는 카메라의 pointer
             std::shared_ptr<Camera> cam_ptr = board_obs_ptr->cam_.lock();
+            // 해당 카메라의 intrinsics
             if (cam_ptr) {
               double fx = cam_ptr->intrinsics_[0];
               double fy = cam_ptr->intrinsics_[1];
@@ -185,6 +189,8 @@ void Object3D::refineObject(const int nb_iterations) {
               bool refine_board = true;
               // We do not refine the board pose if only one board is visible or
               // if it is the ref board
+              
+              // 하나의 board만 보거나 ref board인 경우 refine x 왜??
               if (ref_board_id_ == board_obs_ptr->board_id_)
                 refine_board = false;
 

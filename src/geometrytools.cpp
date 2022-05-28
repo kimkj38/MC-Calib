@@ -407,16 +407,22 @@ cv::Mat handeyeBootstratpTranslationCalibration(
     unsigned int nb_cluster, unsigned int nb_it,
     std::vector<cv::Mat> pose_abs_1, std::vector<cv::Mat> pose_abs_2) {
   // N clusters but less if less images available
+  // frame의 수가 설정한 클러스터의 수보다 작으면 이미지의 수로 맞춰서 수정
   nb_cluster =
       (pose_abs_1.size() < nb_cluster) ? pose_abs_1.size() : nb_cluster;
 
   // Prepare the translational component of the cameras to be clustered
   cv::Mat position_1_2; // concatenation of the translation of pose 1 and 2 for
                         // clustering
+
+  // object1이 camera_group1에 의해 관측되는 수만큼 반복
   for (unsigned int i = 0; i < pose_abs_1.size(); i++) {
     cv::Mat trans_1, trans_2, rot_1, rot_2;
-    Proj2RT(pose_abs_1[i], rot_1, trans_1);
+    // Rodrigues matrix로 변환
+    Proj2RT(pose_abs_1[i], rot_1, trans_1); 
     Proj2RT(pose_abs_2[i], rot_2, trans_2);
+
+    // 카메라 그룹1,2의 tranlation 행렬 concat하여 position_1_2에 push
     cv::Mat concat_trans_1_2;
     cv::hconcat(trans_1.t(), trans_2.t(), concat_trans_1_2);
     position_1_2.push_back(concat_trans_1_2);
@@ -427,6 +433,8 @@ cv::Mat handeyeBootstratpTranslationCalibration(
   cv::Mat labels;
   cv::Mat centers;
   int nb_kmean_iterations = 5;
+
+  // kmeans를 통해 20개로 클러스터링
   double compactness =
       cv::kmeans(position_1_2, nb_cluster, labels,
                  cv::TermCriteria(
@@ -439,9 +447,12 @@ cv::Mat handeyeBootstratpTranslationCalibration(
   std::vector<double> t1_he, t2_he, t3_he; // structure to save valid trans
   unsigned int nb_clust_pick = 6;
   unsigned int nb_success = 0;
+
+  // 200번의 Iteration
   for (unsigned int iter = 0; iter < nb_it; iter++) {
 
     // pick from n of these clusters randomly
+    // 각 미니배치마다 6개의 cluster를 랜덤하게 뽑는다
     std::vector<unsigned int> shuffled_ind(nb_cluster);
     std::iota(shuffled_ind.begin(), shuffled_ind.end(), 0);
     std::random_device rd; // initialize random number generator
@@ -454,6 +465,7 @@ cv::Mat handeyeBootstratpTranslationCalibration(
     }
 
     // Select one pair of pose for each cluster
+    // 각 cluster에서 랜덤하게 하나의 pose 선택(총 6개의 pose)
     std::vector<unsigned int> pose_ind;
     pose_ind.reserve(cluster_select.size());
     for (const unsigned int &clust_ind : cluster_select) {
@@ -480,11 +492,14 @@ cv::Mat handeyeBootstratpTranslationCalibration(
     r_cam_group_2.reserve(pose_ind.size());
     t_cam_group_2.reserve(pose_ind.size());
     for (const auto &pose_ind_i : pose_ind) {
+      
       // get the poses
+      // 각 카메라 그룹의 pose 추출
       cv::Mat pose_cam_group_1 = pose_abs_1[pose_ind_i].inv();
       cv::Mat pose_cam_group_2 = pose_abs_2[pose_ind_i];
 
       // save in datastruct
+      // Rodrigues rotation과 translation으로 분리
       cv::Mat r_1, r_2, t_1, t_2;
       Proj2RT(pose_cam_group_1, r_1, t_1);
       Proj2RT(pose_cam_group_2, r_2, t_2);

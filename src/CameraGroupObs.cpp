@@ -40,13 +40,14 @@ void CameraGroupObs::computeObjectsPose() {
   // Find group of observation of the same object
   std::vector<int> object_unique_ind = object_idx_;
   std::vector<int>::iterator newEnd =
-      std::unique(object_unique_ind.begin(), object_unique_ind.end());
+      std::unique(object_unique_ind.begin(), object_unique_ind.end()); //
   object_unique_ind.erase(newEnd, object_unique_ind.end());
 
   // Find indexes of object 3D obs with common index
   std::map<int, std::vector<int>>
       obj_obs_group; // key: object index // value: index in
                      // the vector of observation
+  //공통 index 찾아서 object id에 대한 observation 벡터에서의 id를 key, value로 만들어준다
   for (int i = 0; i < object_unique_ind.size(); i++) {
     for (int j = 0; j < object_idx_.size(); j++) {
       if (object_idx_[j] == object_unique_ind[i]) {
@@ -56,6 +57,7 @@ void CameraGroupObs::computeObjectsPose() {
   }
 
   // Compute the pose of the objects:
+  // obj_obs_group에 대한 반복문
   for (const auto &it_obj_obs : obj_obs_group) {
     // if the reference camera has an observation, take its pose as initial
     // value
@@ -64,9 +66,10 @@ void CameraGroupObs::computeObjectsPose() {
     for (int i = 0; i < it_obj_obs.second.size(); i++) {
       auto cam_group_ptr = cam_group_.lock();
       auto obj_obs_ptr = object_observations_[it_obj_obs.second[i]].lock();
+      // ref_camera로 관측되는 object가 있는 경우 flag_ref_cam = true, R|t 그대로 받아온다
       if (cam_group_ptr && obj_obs_ptr &&
           cam_group_ptr->id_ref_cam_ == obj_obs_ptr->camera_id_) {
-        flag_ref_cam = true;
+        flag_ref_cam = true; 
         group_pose_r = obj_obs_ptr->getRotInGroupVec();
         group_pose_t = obj_obs_ptr->getTransInGroupVec();
       }
@@ -74,6 +77,7 @@ void CameraGroupObs::computeObjectsPose() {
 
     // if the reference camera has no visible observation, then take
     // the average of other observations
+    // ref_camera로 관측되는 object가 없는 경우 모든 observations와의 R,t의 평균을 group_pose로 사용
     if (flag_ref_cam == false) {
       cv::Mat average_rotation = cv::Mat::zeros(3, 1, CV_64F);
       cv::Mat average_translation = cv::Mat::zeros(3, 1, CV_64F);

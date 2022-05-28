@@ -219,8 +219,8 @@ cv::Mat Object3DObs::getTransInGroupVec() const {
 void Object3DObs::estimatePose(const float ransac_thresh,
                                const int ransac_iterations) {
   std::vector<cv::Point3f> object_pts_temp;
-  object_pts_temp.reserve(pts_id_.size()); //pts_id: object의 id
-  // object의 수만큼 반복
+  object_pts_temp.reserve(pts_id_.size()); //pts_id: object의 points의 id
+  // object의 points 수만큼 반복
   for (const auto &pt_id : pts_id_) {
     auto object_3d_ptr = object_3d_.lock();
     if (object_3d_ptr)
@@ -231,7 +231,7 @@ void Object3DObs::estimatePose(const float ransac_thresh,
   // Estimate the pose using a RANSAC
   cv::Mat r_vec(1, 3, CV_64F); // roation
   cv::Mat t_vec(1, 3, CV_64F); // tranlation
-  std::shared_ptr<Camera> cam_ptr = cam_.lock(); // cam_: object에 해당하는 카메라
+  std::shared_ptr<Camera> cam_ptr = cam_.lock(); // cam_: object를 관측하는 카메라
   if (cam_ptr) {
     cv::Mat inliers = ransacP3PDistortion(
         object_pts_temp, pts_2d_, cam_ptr->getCameraMat(),

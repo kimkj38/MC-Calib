@@ -101,7 +101,7 @@ struct ReprojectionError {
 
     return true;
   }
-
+  // 2,6,9는 각각 residual의 차원, x의 차원, y의 차원
   static ceres::CostFunction *Create(const double u, const double v,
                                      const double x, const double y,
                                      const double z,

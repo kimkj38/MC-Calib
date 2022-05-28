@@ -147,12 +147,15 @@ cv::Mat CameraGroup::getCameraTransVec(int id_cam) {
  *
  */
 void CameraGroup::computeObjPoseInCameraGroup() {
+  // frame에 대해 반복문
   for (const auto &it_frame : frames_) {
     auto frame_ptr = it_frame.second.lock();
     if (frame_ptr) {
       // Iterate through cameraGroupObs
       std::map<int, std::weak_ptr<CameraGroupObs>> current_cam_group_obs_vec =
           frame_ptr->cam_group_observations_;
+      
+      // 해당 frame에서 관측되는 cam_group_observations_<CameraGroupObs>에 대해 반복문
       for (const auto &it_cam_group_obs : current_cam_group_obs_vec) {
         auto cam_group_obs_ptr = it_cam_group_obs.second.lock();
         if (cam_group_obs_ptr &&
@@ -160,14 +163,16 @@ void CameraGroup::computeObjPoseInCameraGroup() {
           // iterate through 3D object obs
           std::map<int, std::weak_ptr<Object3DObs>> current_obj3d_obs_vec =
               cam_group_obs_ptr->object_observations_;
+
+          // object_observations_<Object3DObs>에 대해 반복문
           for (const auto &it_obj3d : current_obj3d_obs_vec) {
             // Transform the 3D object in the referential of the group
             std::shared_ptr<Object3DObs> it_obj3d_ptr = it_obj3d.second.lock();
             if (it_obj3d_ptr) {
-              int current_cam_id = it_obj3d_ptr->camera_id_;
-              cv::Mat pose_cam_mat = getCameraPoseMat(current_cam_id);
-              cv::Mat pose_obj_mat = it_obj3d_ptr->getPoseMat();
-              cv::Mat pose_in_ref_mat = pose_cam_mat.inv() * pose_obj_mat;
+              int current_cam_id = it_obj3d_ptr->camera_id_; //해당 object를 관측하는 camera id
+              cv::Mat pose_cam_mat = getCameraPoseMat(current_cam_id); // current_cam의 그룹 내 ref_camera에 대한 pose
+              cv::Mat pose_obj_mat = it_obj3d_ptr->getPoseMat(); // 카메라에 대한 object의 pose
+              cv::Mat pose_in_ref_mat = pose_cam_mat.inv() * pose_obj_mat; //ref_camera의 object에 대한 pose 계산
               // set in the observation
               it_obj3d_ptr->setPoseInGroupMat(pose_in_ref_mat);
             }
@@ -373,12 +378,14 @@ void CameraGroup::refineCameraGroupAndObjects(const int nb_iterations) {
   LOG_INFO << "Number of frames for camera group optimization  :: "
            << frames_.size();
   // Iterate through frames
+  // frame에 대해 반복문
   for (const auto &it_frame : frames_) {
     auto frame_ptr = it_frame.second.lock();
     if (frame_ptr) {
       // Iterate through cameraGroupObs
       std::map<int, std::weak_ptr<CameraGroupObs>> current_cam_group_obs_vec =
           frame_ptr->cam_group_observations_;
+      // 해당 frame의 카메라 그룹에 대해 반복문
       for (const auto &it_cam_group_obs : current_cam_group_obs_vec) {
         auto cam_group_obs_ptr = it_cam_group_obs.second.lock();
         // Check if the current group the group we refine (be careful)
@@ -387,6 +394,8 @@ void CameraGroup::refineCameraGroupAndObjects(const int nb_iterations) {
           // iterate through 3D object obs
           std::map<int, std::weak_ptr<Object3DObs>> current_obj3d_obs_vec =
               cam_group_obs_ptr->object_observations_;
+
+          // 카메라 그룹의 object_observations에 대해 반복문
           for (const auto &it_obj3d : current_obj3d_obs_vec) {
             std::shared_ptr<Object3DObs> it_obj3d_ptr = it_obj3d.second.lock();
             if (it_obj3d_ptr) {
@@ -400,6 +409,7 @@ void CameraGroup::refineCameraGroupAndObjects(const int nb_iterations) {
                 const std::vector<cv::Point2f> &obj_pts_2d =
                     it_obj3d_ptr->pts_2d_;
                 std::shared_ptr<Camera> cam_ptr = it_obj3d_ptr->cam_.lock();
+                // object_observations를 보는 카메라의 intrinsics
                 if (cam_ptr) {
                   double fx = cam_ptr->intrinsics_[0];
                   double fy = cam_ptr->intrinsics_[1];
@@ -411,6 +421,7 @@ void CameraGroup::refineCameraGroupAndObjects(const int nb_iterations) {
                   double t2 = cam_ptr->intrinsics_[7];
                   double r3 = cam_ptr->intrinsics_[8];
                   bool refine_cam = true;
+                  
                   // We do not refine the camera pose if it is the ref camera
                   if (this->id_ref_cam_ == cam_ptr->cam_idx_) {
                     refine_cam = false;
